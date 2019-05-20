@@ -1,0 +1,377 @@
+package com.diamonddrake.wav;
+
+// WavInfo by Rickey Ward
+// based on wavIO by Evan X. Merz -> www.thisisnotalabel.com ("wav IO based on code by Evan Merz")
+// do with this whatever you want provided you credit us appropriately ("WavInfo based on code by Even Merz and Rickey Ward")
+
+import java.io.DataInputStream;
+import java.io.FileInputStream;
+import java.util.*;
+
+public class WavInfo {
+	/*
+	  WAV File Specification
+	  FROM http://ccrma.stanford.edu/courses/422/projects/WaveFormat/
+	  EXTEND by RW fom http://soundfile.sapp.org/doc/WaveFormat/
+	 The canonical WAVE format starts with the RIFF header:
+	 0         4   ChunkID          Contains the letters "RIFF" in ASCII form
+	                                (0x52494646 big-endian form).
+	 4         4   ChunkSize        36 + SubChunk2Size, or more precisely:
+	                                4 + (8 + SubChunk1Size) + (8 + SubChunk2Size)
+	                                This is the size of the rest of the chunk 
+	                                following this number.  This is the size of the 
+	                                entire file in bytes minus 8 bytes for the
+	                                two fields not included in this count:
+	                                ChunkID and ChunkSize.
+	 8         4   Format           Contains the letters "WAVE"
+	                                (0x57415645 big-endian form).
+
+	 The "WAVE" format consists of two subchunks: "fmt " and "data":
+	 The "fmt " subchunk describes the sound data's format:
+	 12        4   Subchunk1ID      Contains the letters "fmt "
+	                                (0x666d7420 big-endian form).
+	 16        4   Subchunk1Size    16 for PCM.  This is the size of the
+	                                rest of the Subchunk which follows this number.
+	 20        2   AudioFormat      PCM = 1 (i.e. Linear quantization)
+	                                Values other than 1 indicate some 
+	                                form of compression.
+	 22        2   NumChannels      Mono = 1, Stereo = 2, etc.
+	 24        4   SampleRate       8000, 44100, etc.
+	 28        4   ByteRate         == SampleRate * NumChannels * BitsPerSample/8
+	 32        2   BlockAlign       == NumChannels * BitsPerSample/8
+	                                The number of bytes for one sample including
+	                                all channels. I wonder what happens when
+	                                this number isn't an integer?
+	 34        2   BitsPerSample    8 bits = 8, 16 bits = 16, etc.
+	 --        2   ExtraParamSize   if PCM, then doesn't exist
+	 --        X   ExtraParams      space for extra parameters
+
+	 The "data" subchunk contains the size of the data and the actual sound:
+	 36        4   Subchunk2ID      Contains the letters "data"
+	                                (0x64617461 big-endian form).
+	 40        4   Subchunk2Size    == NumSamples * NumChannels * BitsPerSample/8
+	                                This is the number of bytes in the data.
+	                                You can also think of this as the size
+	                                of the read of the subchunk following this 
+	                                number.
+	 44        *   Data             The actual sound data.
+
+
+	NOTE TO READERS:
+
+	The thing that makes reading wav files tricky is that java has no unsigned types.  This means that the
+	binary data can't just be read and cast appropriately.  Also, we have to use larger types
+	than are normally necessary.
+
+	In many languages including java, an integer is represented by 4 bytes.  The issue here is
+	that in most languages, integers can be signed or unsigned, and in wav files the  integers
+	are unsigned.  So, to make sure that we can store the proper values, we have to use longs
+	to hold integers, and integers to hold shorts.
+	
+	+Evan's original work didn't account for optional non PCM fmt header chunks. that's been fixed.
+	+removed storing/reading of actual wav data, as this version is just for getting info about wav files.
+	+added RIFF LIST INFO header parsing.
+	
+	 */
+	
+	// our private variables
+	private String myPath;
+	private int myFormat;
+	private long myChannels;
+	private long mySampleRate;
+	private long myByteRate;
+	private int myBlockAlign;
+	private int myBitsPerSample;
+	private long myDataSize;
+	private List<ListInfoDataPair> myInfo;	
+	
+	//get into set if available
+	public List<ListInfoDataPair> getInfo() {
+		return myInfo;
+	}
+
+	public boolean hasInfo() {
+		return !(myInfo == null);
+	}
+	
+	public String getInfo(String name) {
+		if(myInfo == null)
+			return null;
+		for(ListInfoDataPair ld : myInfo) {
+			if(ld.dType.equals(name))
+				return ld.data;
+		}
+		return null;
+	}
+	
+	public String getInfo(InfoTypes infoType) {
+		if(myInfo == null)
+			return null;
+		for(ListInfoDataPair ld : myInfo) {
+			if(ld.dType.equals(infoType.getValue()))
+				return ld.data;
+		}
+		return null;
+	}
+		
+	// get/set for the Path property
+	public String getPath()
+	{
+		return myPath;
+	}
+	public void setPath(String newPath)
+	{
+		myPath = newPath;
+	}
+	
+	//IVRs from Avaya platforms supports just a few audio combinations
+	//this one is popular and works well
+	public boolean isIVRFormat() {
+		if(myByteRate != 8000)
+			return false;
+		if(myChannels != 1)
+			return false;
+		if(myFormat != 7)
+			return false;
+		if(myBitsPerSample != 8)
+			return false;
+		return true;
+	}
+
+	// empty constructor
+	public WavInfo()
+     {
+		myPath = "";
+     }
+
+	// constructor takes a wav path
+	public WavInfo(String filePath)
+     {
+		myPath = filePath;
+		this.read();
+     }
+	
+	// read a wav file into this class
+	// called automatically with string constructor
+	public boolean read()
+	{
+		DataInputStream inFile = null;
+		byte[] tmpLong = new byte[4];
+		byte[] tmpInt = new byte[2];
+
+		try
+		{
+			inFile = new DataInputStream(new FileInputStream(myPath));
+
+			//System.out.println("Reading wav file...\n"); // for debugging only
+
+			String chunkID = "" + (char)inFile.readByte() + (char)inFile.readByte() + (char)inFile.readByte() + (char)inFile.readByte();
+			if(!chunkID.equals("RIFF")) {
+				inFile.close();
+				return false;
+			}
+
+			inFile.read(tmpLong); // read the ChunkSize
+			@SuppressWarnings("unused")
+			long myChunkSize = byteArrayToLong(tmpLong);
+
+			String format = "" + (char)inFile.readByte() + (char)inFile.readByte() + (char)inFile.readByte() + (char)inFile.readByte();
+			if(!format.equals("WAVE")) {
+				inFile.close();
+				return false;
+			}
+			// print what we've read so far
+			//System.out.println("chunkID:" + chunkID + " chunk1Size:" + myChunkSize + " format:" + format); // for debugging only
+
+			String subChunk1ID = "" + (char)inFile.readByte() + (char)inFile.readByte() + (char)inFile.readByte() + (char)inFile.readByte();
+			if(!subChunk1ID.equals("fmt ")) {
+				inFile.close();
+				return false;
+			}
+			//System.out.println("first subChunkID '" + subChunk1ID + "'");
+
+			inFile.read(tmpLong); // read the SubChunk1Size
+			@SuppressWarnings("unused")
+			long mySubChunk1Size = byteArrayToLong(tmpLong);
+
+			inFile.read(tmpInt); // read the audio format.  This should be 1 for PCM
+			myFormat = byteArrayToInt(tmpInt);
+
+			inFile.read(tmpInt); // read the # of channels (1 or 2)
+			myChannels = byteArrayToInt(tmpInt);
+			
+			inFile.read(tmpLong); // read the samplerate
+			mySampleRate = byteArrayToLong(tmpLong);
+
+			inFile.read(tmpLong); // read the byterate
+			myByteRate = byteArrayToLong(tmpLong);
+
+			inFile.read(tmpInt); // read the blockalign
+			myBlockAlign = byteArrayToInt(tmpInt);
+
+			inFile.read(tmpInt); // read the bitspersample
+			myBitsPerSample = byteArrayToInt(tmpInt);
+			
+			//if PCM we are are down with fmt,
+			//if not PMC need to read 2 bytes and check the extra param size, then read those
+			if(myFormat != 1) {
+				inFile.read(tmpInt); // read the extraParamSize
+				int extraParamSize = byteArrayToInt(tmpInt);
+				while(extraParamSize-- > 0) {
+					inFile.skipBytes(1);
+				}
+			}
+			
+			// print what we've read so far
+			//System.out.println("SubChunk1ID:" + subChunk1ID + " SubChunk1Size:" + mySubChunk1Size + " AudioFormat:" + myFormat + " Channels:" + myChannels + " SampleRate:" + mySampleRate);
+
+			// read the data chunk header - reading this IS necessary, because not all wav files will have the data chunk here - for now, we're just assuming that the data chunk is here
+			String dataChunkID = "" + (char)inFile.readByte() + (char)inFile.readByte() + (char)inFile.readByte() + (char)inFile.readByte();
+			
+			inFile.read(tmpLong); // read the size of the data
+			myDataSize = byteArrayToLong(tmpLong);
+			
+			//if it's not data, find the data. (note no worries about infinite loop, read will throw an error if we read the whole file)
+			while(!dataChunkID.equals("data")) {
+				while(myDataSize > 0) {
+					inFile.read(new byte[1]);
+					myDataSize--;
+				}
+				
+				dataChunkID = "" + (char)inFile.readByte() + (char)inFile.readByte() + (char)inFile.readByte() + (char)inFile.readByte();
+				inFile.read(tmpLong); // read the size of the data
+				myDataSize = byteArrayToLong(tmpLong);
+			}
+
+			// read the data chunk
+			inFile.skipBytes((int)myDataSize);
+							
+			//optimization, don't keep reading
+			boolean hasReadInfo = false;			
+			
+			//look at all remaining chunks
+			while(inFile.available() > 0) {
+				String ChunkIDNext = "" + (char)inFile.readByte() + (char)inFile.readByte() + (char)inFile.readByte() + (char)inFile.readByte();
+				inFile.read(tmpLong); // read the ChunkSize (it's from here out, skips the 8 of this size and the name above.
+				long chunkSize = byteArrayToLong(tmpLong);
+				if(!ChunkIDNext.equals("LIST") || hasReadInfo == true) {
+					//Here is where we could process other chunk types
+					inFile.skipBytes((int)chunkSize);
+				}else {
+
+					// read the list type ID
+					String ChunkLISTTypeID = "" + (char)inFile.readByte() + (char)inFile.readByte() + (char)inFile.readByte() + (char)inFile.readByte();
+					
+					//next is all the data, if the type was "INFO" then we can read it.
+					if(!ChunkLISTTypeID.equals("INFO")) {
+						//skip the rest of this LIST block, it's not an INFO block
+						inFile.skipBytes((int)chunkSize - 4);
+					}
+					
+					myInfo = ListInfoDataPair.getData(inFile, (int)chunkSize);
+					hasReadInfo = true;
+				}
+			}
+			
+			//we've Processed all the chunks, or we found what we were looking for
+			inFile.close();		
+		
+		}
+		catch(Exception e)
+		{
+			System.out.println("error occured");
+			e.printStackTrace();
+			return false;
+		}
+
+		return true; // this should probably be something more descriptive
+	}
+	
+	
+	//===========================
+	// UTILITLES
+	//===========================
+	
+	// return a printable summary of the wav file
+	public String getSummary()
+	{
+		//String newline = System.getProperty("line.separator");
+		String newline = "\r\n";
+		String summary = "Format: " + myFormat + newline + "Channels: " + myChannels + newline + "SampleRate: " + mySampleRate + newline + "ByteRate: " + myByteRate + newline + "BlockAlign: " + myBlockAlign + newline + "BitsPerSample: " + myBitsPerSample + newline + "DataSize: " + myDataSize;
+		
+		if(myInfo != null) {
+			StringBuilder sb = new StringBuilder();
+			sb.append(newline + "LIST INFO CHUCK");
+			String indent = "    ";
+			for(ListInfoDataPair ld : myInfo) {
+				sb.append(newline +indent +  ld.dType + "(" + InfoTypes.forCode(ld.dType).toString() + ")->" + ld.data);
+			}
+			summary += sb.toString();
+		}
+	
+		return summary;
+	}
+	
+	
+	//===========================
+	//CONVERT BYTES TO JAVA TYPES
+	//===========================
+
+		// these two routines convert a byte array to a unsigned short
+		public static int byteArrayToInt(byte[] b)
+		{
+			int start = 0;
+			int low = b[start] & 0xff;
+			int high = b[start+1] & 0xff;
+			return (int)( high << 8 | low );
+		}
+
+
+		// these two routines convert a byte array to an unsigned integer
+		public static long byteArrayToLong(byte[] b)
+		{
+			int start = 0;
+			int i = 0;
+			int len = 4;
+			int cnt = 0;
+			byte[] tmp = new byte[len];
+			for (i = start; i < (start + len); i++)
+			{
+				tmp[cnt] = b[i];
+				cnt++;
+			}
+			long accum = 0;
+			i = 0;
+			for ( int shiftBy = 0; shiftBy < 32; shiftBy += 8 )
+			{
+				accum |= ( (long)( tmp[i] & 0xff ) ) << shiftBy;
+				i++;
+			}
+			return accum;
+		}
+
+
+	//===========================
+	//CONVERT JAVA TYPES TO BYTES
+	//===========================
+		
+		// returns a byte array of length 4
+		@SuppressWarnings("unused")
+		private static byte[] intToByteArray(int i)
+		{
+			byte[] b = new byte[4];
+			b[0] = (byte) (i & 0x00FF);
+			b[1] = (byte) ((i >> 8) & 0x000000FF);
+			b[2] = (byte) ((i >> 16) & 0x000000FF);
+			b[3] = (byte) ((i >> 24) & 0x000000FF);
+			return b;
+		}
+
+		// convert a short to a byte array
+		@SuppressWarnings("unused")
+		public static byte[] shortToByteArray(short data)
+		{
+			return new byte[]{(byte)(data & 0xff),(byte)((data >>> 8) & 0xff)};
+		}
+		
+}

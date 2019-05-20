@@ -1,7 +1,7 @@
 # JavaWavInfo
 Read RIFF metadata Chunks of WAV files in JAVA
 
-### example
+### Eample Usage
 ```package testWavInfo;
 
 import com.diamonddrake.wav.InfoTypes;
