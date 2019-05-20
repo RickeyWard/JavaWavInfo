@@ -1,5 +1,6 @@
 # JavaWavInfo
 Read RIFF metadata Chunks of WAV files in JAVA
+based on wavIO by Evan X. Merz, extended to support more of of the RIFF wav format spec
 
 ### Eample Usage
 ```package testWavInfo;
