@@ -266,10 +266,11 @@ public class WavInfo {
 					if(!ChunkLISTTypeID.equals("INFO")) {
 						//skip the rest of this LIST block, it's not an INFO block
 						inFile.skipBytes((int)chunkSize - 4);
+					} else {
+						//if it is INFO
+						myInfo = ListInfoDataPair.getData(inFile, (int)chunkSize);
+						hasReadInfo = true;
 					}
-					
-					myInfo = ListInfoDataPair.getData(inFile, (int)chunkSize);
-					hasReadInfo = true;
 				}
 			}
 			
