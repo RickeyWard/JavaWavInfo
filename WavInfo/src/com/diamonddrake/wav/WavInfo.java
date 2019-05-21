@@ -161,10 +161,11 @@ public class WavInfo {
 		try(DataInputStream inFile = new DataInputStream(new FileInputStream(myPath)))
 		{
 
-			//System.out.println("Reading wav file...\n"); // for debugging only
+     		//Read the RIFF header, verify it's a RIFF file with a WAVE format.
 
 			String chunkID = "" + (char)inFile.readByte() + (char)inFile.readByte() + (char)inFile.readByte() + (char)inFile.readByte();
 			if(!chunkID.equals("RIFF")) {
+				//System.out.println("RIFF header missing or file corrupted");
 				return false;
 			}
 
@@ -174,74 +175,12 @@ public class WavInfo {
 
 			String format = "" + (char)inFile.readByte() + (char)inFile.readByte() + (char)inFile.readByte() + (char)inFile.readByte();
 			if(!format.equals("WAVE")) {
+				//System.out.println("not a WAVE format file or file corrupted");
 				return false;
 			}
-			// print what we've read so far
-			//System.out.println("chunkID:" + chunkID + " chunk1Size:" + myChunkSize + " format:" + format); // for debugging only
 
-			String subChunk1ID = "" + (char)inFile.readByte() + (char)inFile.readByte() + (char)inFile.readByte() + (char)inFile.readByte();
-			if(!subChunk1ID.equals("fmt ")) {
-				return false;
-			}
-			//System.out.println("first subChunkID '" + subChunk1ID + "'");
 
-			inFile.read(tmpLong); // read the SubChunk1Size
-			@SuppressWarnings("unused")
-			long mySubChunk1Size = byteArrayToLong(tmpLong);
-
-			inFile.read(tmpInt); // read the audio format.  This should be 1 for PCM
-			myFormat = byteArrayToInt(tmpInt);
-
-			inFile.read(tmpInt); // read the # of channels (1 or 2)
-			myChannels = byteArrayToInt(tmpInt);
-			
-			inFile.read(tmpLong); // read the samplerate
-			mySampleRate = byteArrayToLong(tmpLong);
-
-			inFile.read(tmpLong); // read the byterate
-			myByteRate = byteArrayToLong(tmpLong);
-
-			inFile.read(tmpInt); // read the blockalign
-			myBlockAlign = byteArrayToInt(tmpInt);
-
-			inFile.read(tmpInt); // read the bitspersample
-			myBitsPerSample = byteArrayToInt(tmpInt);
-			
-			//if PCM we are are down with fmt,
-			//if not PMC need to read 2 bytes and check the extra param size, then read those
-			if(myFormat != 1) {
-				inFile.read(tmpInt); // read the extraParamSize
-				int extraParamSize = byteArrayToInt(tmpInt);
-				while(extraParamSize-- > 0) {
-					inFile.skipBytes(1);
-				}
-			}
-			
-			// print what we've read so far
-			//System.out.println("SubChunk1ID:" + subChunk1ID + " SubChunk1Size:" + mySubChunk1Size + " AudioFormat:" + myFormat + " Channels:" + myChannels + " SampleRate:" + mySampleRate);
-
-			// read the data chunk header - reading this IS necessary, because not all wav files will have the data chunk here - for now, we're just assuming that the data chunk is here
-			String dataChunkID = "" + (char)inFile.readByte() + (char)inFile.readByte() + (char)inFile.readByte() + (char)inFile.readByte();
-			
-			inFile.read(tmpLong); // read the size of the data
-			myDataSize = byteArrayToLong(tmpLong);
-			
-			//if it's not data, find the data. (note no worries about infinite loop, read will throw an error if we read the whole file)
-			while(!dataChunkID.equals("data")) {
-				while(myDataSize > 0) {
-					inFile.read(new byte[1]);
-					myDataSize--;
-				}
-				
-				dataChunkID = "" + (char)inFile.readByte() + (char)inFile.readByte() + (char)inFile.readByte() + (char)inFile.readByte();
-				inFile.read(tmpLong); // read the size of the data
-				myDataSize = byteArrayToLong(tmpLong);
-			}
-
-			// read the data chunk
-			inFile.skipBytes((int)myDataSize);
-							
-			//optimization, don't keep reading
+			//optimization, don't bother parsing LIST fields if we've already found LIST INFO
 			boolean hasReadInfo = false;			
 			
 			//look at all remaining chunks
@@ -249,14 +188,43 @@ public class WavInfo {
 				String ChunkIDNext = "" + (char)inFile.readByte() + (char)inFile.readByte() + (char)inFile.readByte() + (char)inFile.readByte();
 				inFile.read(tmpLong); // read the ChunkSize (it's from here out, skips the 8 of this size and the name above.
 				long chunkSize = byteArrayToLong(tmpLong);
-				if(!ChunkIDNext.equals("LIST") || hasReadInfo == true) {
-					//Here is where we could process other chunk types
-					inFile.skipBytes((int)chunkSize);
-				}else {
 
+				if(ChunkIDNext.equals("data")){
+					myDataSize = chunkSize;
+					inFile.skipBytes((int)myDataSize);
+				} else if(ChunkIDNext.equals("fmt ")){
+					//read fmt chunk
+
+					inFile.read(tmpInt); // read the audio format.  This should be 1 for PCM
+					myFormat = byteArrayToInt(tmpInt);
+		
+					inFile.read(tmpInt); // read the # of channels (1 or 2)
+					myChannels = byteArrayToInt(tmpInt);
+					
+					inFile.read(tmpLong); // read the samplerate
+					mySampleRate = byteArrayToLong(tmpLong);
+		
+					inFile.read(tmpLong); // read the byterate
+					myByteRate = byteArrayToLong(tmpLong);
+		
+					inFile.read(tmpInt); // read the blockalign
+					myBlockAlign = byteArrayToInt(tmpInt);
+		
+					inFile.read(tmpInt); // read the bitspersample
+					myBitsPerSample = byteArrayToInt(tmpInt);
+					
+					//if PCM we are are down with fmt,
+					//if not PMC need to read 2 bytes and check the extra param size, then read those
+					if(myFormat != 1) {
+						inFile.read(tmpInt); // read the extraParamSize
+						int extraParamSize = byteArrayToInt(tmpInt);
+						while(extraParamSize-- > 0) {
+							inFile.skipBytes(1);
+						}
+					}
+				} else if(ChunkIDNext.equals("LIST") && !hasReadInfo) {
 					// read the list type ID
 					String ChunkLISTTypeID = "" + (char)inFile.readByte() + (char)inFile.readByte() + (char)inFile.readByte() + (char)inFile.readByte();
-					
 					//next is all the data, if the type was "INFO" then we can read it.
 					if(!ChunkLISTTypeID.equals("INFO")) {
 						//skip the rest of this LIST block, it's not an INFO block
@@ -266,6 +234,23 @@ public class WavInfo {
 						myInfo = ListInfoDataPair.getData(inFile, (int)chunkSize);
 						hasReadInfo = true;
 					}
+				} else if(ChunkIDNext.equals("id3 ")){
+					inFile.skipBytes((int)chunkSize);
+					
+					// int bytesReadSoFar = 0;			
+					// //System.out.println("found an ID3 tag, skipping for now");
+					// byte[] id3TagHeader = new byte[10];
+					// bytesReadSoFar += 10;
+					// inFile.read(id3TagHeader);
+					// String id = new String(id3TagHeader, 0, 3);
+					// if(!id.equals("ID3")){
+					// 	inFile.skipBytes((int)chunkSize - bytesReadSoFar);
+					// 	//System.out.println("wasn't valid, something is wrong");
+					// }
+
+				//if this chunk is a type we aren't looking for, just skip it.
+				else {
+					inFile.skipBytes((int)chunkSize);
 				}
 			}	
 		
