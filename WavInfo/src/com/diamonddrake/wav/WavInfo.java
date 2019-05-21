@@ -155,19 +155,16 @@ public class WavInfo {
 	// called automatically with string constructor
 	public boolean read()
 	{
-		DataInputStream inFile = null;
 		byte[] tmpLong = new byte[4];
 		byte[] tmpInt = new byte[2];
 
-		try
+		try(DataInputStream inFile = new DataInputStream(new FileInputStream(myPath)))
 		{
-			inFile = new DataInputStream(new FileInputStream(myPath));
 
 			//System.out.println("Reading wav file...\n"); // for debugging only
 
 			String chunkID = "" + (char)inFile.readByte() + (char)inFile.readByte() + (char)inFile.readByte() + (char)inFile.readByte();
 			if(!chunkID.equals("RIFF")) {
-				inFile.close();
 				return false;
 			}
 
@@ -177,7 +174,6 @@ public class WavInfo {
 
 			String format = "" + (char)inFile.readByte() + (char)inFile.readByte() + (char)inFile.readByte() + (char)inFile.readByte();
 			if(!format.equals("WAVE")) {
-				inFile.close();
 				return false;
 			}
 			// print what we've read so far
@@ -185,7 +181,6 @@ public class WavInfo {
 
 			String subChunk1ID = "" + (char)inFile.readByte() + (char)inFile.readByte() + (char)inFile.readByte() + (char)inFile.readByte();
 			if(!subChunk1ID.equals("fmt ")) {
-				inFile.close();
 				return false;
 			}
 			//System.out.println("first subChunkID '" + subChunk1ID + "'");
@@ -272,10 +267,7 @@ public class WavInfo {
 						hasReadInfo = true;
 					}
 				}
-			}
-			
-			//we've Processed all the chunks, or we found what we were looking for
-			inFile.close();		
+			}	
 		
 		}
 		catch(Exception e)
