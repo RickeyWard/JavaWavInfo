@@ -248,6 +248,7 @@ public class WavInfo {
 					// 	//System.out.println("wasn't valid, something is wrong");
 					// }
 
+				}
 				//if this chunk is a type we aren't looking for, just skip it.
 				else {
 					inFile.skipBytes((int)chunkSize);
