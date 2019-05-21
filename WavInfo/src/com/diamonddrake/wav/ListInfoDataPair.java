@@ -32,14 +32,13 @@ public class ListInfoDataPair {
 			inFile.read(tmpLong); // read the bitspersample
 			int textSize = WavInfo.byteArrayToInt(tmpLong);
 			consumedBytes+=4;
-			int trimSize = textSize - 2; // string is null terminated.
 			StringBuilder sb = new StringBuilder();
 			while(textSize > 0) {
 				sb.append("" + (char)inFile.readByte());
 				textSize--;
 				consumedBytes+=1;
 			}
-			return new ListInfoDataPair(ID, textSize, sb.toString().substring(0, trimSize), consumedBytes);
+			return new ListInfoDataPair(ID, textSize, sb.toString().trim(), consumedBytes);
 		}
 		catch(Exception ex) {
 			return null;
