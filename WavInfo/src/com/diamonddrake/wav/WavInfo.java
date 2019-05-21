@@ -297,7 +297,11 @@ public class WavInfo {
 			sb.append(newline + "LIST INFO CHUCK");
 			String indent = "    ";
 			for(ListInfoDataPair ld : myInfo) {
-				sb.append(newline +indent +  ld.dType + "(" + InfoTypes.forCode(ld.dType).toString() + ")->" + ld.data);
+				InfoTypes InfoType = InfoTypes.forCode(ld.dType);
+				String descriptionType = "";
+				if(InfoType != null)
+					descriptionType = "(" + InfoType.toString() + ")";
+				sb.append(newline +indent +  ld.dType + descriptionType +"->" + ld.data);
 			}
 			summary += sb.toString();
 		}
